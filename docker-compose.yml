@@ -1,0 +1,34 @@
+version: "3.8"
+services:
+  db:
+    image: mysql:latest
+    restart: always
+    ports:
+      - "3306:3306"  #    Should this be online?
+    environment:
+      - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
+    volumes:
+      - db-data:/var/lib/mysql
+  backend:
+    build: ./backend/ #TODO change this with docker image from dockerhub
+    restart: always
+    ports:
+      - "5001:5000" # Should this be online?
+    environment:
+      - DB_HOST=db
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+    links:
+      - db
+  frontend:
+    build: ./frontend/
+    restart: always
+    ports:
+      - "8501:8501"
+    environment:
+      - API_HOST=backend
+      - API_PORT=5000
+    links:
+      - backend
+volumes:
+  db-data:
