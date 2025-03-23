@@ -1,7 +1,5 @@
 pipeline {
     agent any
-    def frontend_app
-    def backend_app
 
     environment {
         BACKEND_IMAGE = 'stefan5andonov/kiii2025-backend-image'
