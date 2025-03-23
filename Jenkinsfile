@@ -7,6 +7,9 @@ pipeline {
     }
 
     stages {
+        stage('Clone repository') {
+            checkout scm
+        }
         stage('Build Backend Image') {
             steps {
                 script {
