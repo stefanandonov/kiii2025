@@ -1,5 +1,5 @@
 
-# 🚀 Guide: Deploying EC2 Infrastructure with Docker & Terraform  
+# 🚀 Guide: Deploying EC2 launch template with Docker & Terraform  
 ### 💡 Course: Continuous Integration and Delivery
 
 This guide will walk you through using **AWS** and a pre-built **Docker image** to automatically create a launch template and SSH key for EC2 — without needing to learn or write any Terraform code.
