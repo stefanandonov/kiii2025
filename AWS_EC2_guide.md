@@ -33,6 +33,7 @@ This guide will walk you through using **AWS** and a pre-built **Docker image** 
 4. Choose **“Application running outside AWS”**
 5. Click **Next → Create access key**
 6. ✅ **Save your Access Key ID and Secret Access Key** — this is your only chance to copy them
+ - **Be extremely cautious with these credentials! Don't send them to anyone else, as they can be easily exploited by someone to create expensive resources on your AWS account.**
 
 ---
 
