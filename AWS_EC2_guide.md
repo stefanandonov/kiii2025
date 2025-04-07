@@ -103,9 +103,6 @@ ssh -i kiii-key.pem ec2-user@3.123.45.67
 
 To avoid AWS charges:
 - Go to **EC2 → Instances** → Terminate unused instances
-- Go to **Launch Templates** → Delete the launch template
-- Go to **EC2 → Key Pairs** → Delete the key pair
-- Go to **IAM → Roles** → Delete the role and instance profile if no longer needed
 
 ---
 
