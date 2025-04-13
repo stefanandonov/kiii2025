@@ -3,12 +3,13 @@ name: Deploy to Production
 on:
   push:
     branches:
-      - main  # Runs when code is merged into main
+      - main
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-
+    outputs:
+      branch_name: ${{ steps.vars.outputs.branch_name }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v3
@@ -17,18 +18,6 @@ jobs:
         id: vars
         run: echo "branch_name=$(echo ${{ github.ref_name }} | tr '/' '-')" >> "$GITHUB_OUTPUT"
 
-      - name: Echo branch name
-        run: |
-          echo "Branch name is ${{ steps.vars.outputs.branch_name }}"
-
-      # Configure AWS Credentials
-      - name: Configure AWS Credentials
-        run: |
-          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws configure set default.region ${{ secrets.AWS_REGION }}
-
-      # Authenticate with Docker Hub
       - name: Login to Docker Hub
         run: echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
 
@@ -42,81 +31,55 @@ jobs:
           docker build --pull -t ${{ secrets.DOCKERHUB_USERNAME }}/kiii-2025-frontend:${{ steps.vars.outputs.branch_name }}-latest ./frontend
           docker push ${{ secrets.DOCKERHUB_USERNAME }}/kiii-2025-frontend:${{ steps.vars.outputs.branch_name }}-latest
 
+  aws_instance_prep:
+    runs-on: ubuntu-latest
+    needs: build
+    outputs:
+      instance_id: ${{ steps.set_env.outputs.instance_id }}
+      public_ip: ${{ steps.get_ip.outputs.public_ip }}
+    steps:
+      - name: Set branch name
+        id: vars
+        run: echo "branch_name=${{ needs.build.outputs.branch_name }}" >> "$GITHUB_ENV"
 
+      - name: Configure AWS Credentials
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set default.region ${{ secrets.AWS_REGION }}
 
-      # Check if EC2 instance exists
-      - name: Find Existing EC2 Instance
-        id: find_instance
+      - name: Check for existing EC2 instance
+        id: check_instance
         run: |
           INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=tag:Name,Values=kiii-${{ steps.vars.outputs.branch_name }}" "Name=instance-state-name,Values=running" \
+            --filters "Name=tag:Name,Values=kiii-${{ env.branch_name }}" "Name=instance-state-name,Values=running" \
             --query "Reservations[0].Instances[0].InstanceId" \
             --output text)
 
-          if [[ "$INSTANCE_ID" != "None" ]]; then
-            echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-            echo "EXISTING_INSTANCE=true" >> $GITHUB_ENV
-          else
+          if [[ "$INSTANCE_ID" == "None" ]]; then
             echo "EXISTING_INSTANCE=false" >> $GITHUB_ENV
+          else
+            echo "EXISTING_INSTANCE=true" >> $GITHUB_ENV
+            echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           fi
 
-      # Launch EC2 Instance using Launch Template (if needed)
-      - name: Launch EC2 Instance (if needed)
-        if: env.INSTANCE_ID == ''
+      - name: Launch EC2 Instance if needed
+        if: env.EXISTING_INSTANCE == 'false'
         run: |
           INSTANCE_ID=$(aws ec2 run-instances \
             --launch-template LaunchTemplateId=${{ secrets.EC2_LAUNCH_TEMPLATE_ID }} \
-            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=kiii-${{ steps.vars.outputs.branch_name }}}]' \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=kiii-${{ env.branch_name }} }]" \
             --query 'Instances[0].InstanceId' \
             --output text)
-
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-          echo "EXISTING_INSTANCE=false" >> $GITHUB_ENV
-          echo "Created new production instance with ID: $INSTANCE_ID"
 
-      # Wait for EC2 Instance to be Running AND Pass Status Checks
-      - name: Wait for EC2 Instance to Pass Status Checks
+      - name: Wait for instance to be ready
         run: |
-          if [ "$EXISTING_INSTANCE" == "false" ]; then
-            echo "Waiting for EC2 instance ($INSTANCE_ID) to start and pass status checks..."
-            MAX_WAIT=300
-            WAIT_TIME=0
+          INSTANCE_ID=${{ env.INSTANCE_ID }}
+          echo "Waiting for EC2 ($INSTANCE_ID) to be ready..."
+          aws ec2 wait instance-status-ok --instance-ids $INSTANCE_ID
+          echo "Instance is ready."
 
-            while true; do
-              INSTANCE_STATE=$(aws ec2 describe-instances \
-                --instance-ids $INSTANCE_ID \
-                --query "Reservations[0].Instances[0].State.Name" \
-                --output text)
-
-              SYSTEM_STATUS=$(aws ec2 describe-instance-status \
-                --instance-ids $INSTANCE_ID \
-                --query "InstanceStatuses[0].SystemStatus.Status" \
-                --output text)
-
-              INSTANCE_STATUS=$(aws ec2 describe-instance-status \
-                --instance-ids $INSTANCE_ID \
-                --query "InstanceStatuses[0].InstanceStatus.Status" \
-                --output text)
-
-              echo "Instance State: $INSTANCE_STATE | System Status: $SYSTEM_STATUS | Instance Status: $INSTANCE_STATUS"
-
-              if [ "$INSTANCE_STATE" == "running" ] && [ "$SYSTEM_STATUS" == "ok" ] && [ "$INSTANCE_STATUS" == "ok" ]; then
-                echo "EC2 instance is running and has passed status checks!"
-                break
-              fi
-
-              if [ "$WAIT_TIME" -ge "$MAX_WAIT" ]; then
-                echo "ERROR: EC2 instance did not pass status checks within $MAX_WAIT seconds!"
-                exit 1
-              fi
-
-              echo "EC2 instance is still initializing. Retrying in 30 seconds..."
-              sleep 30
-              WAIT_TIME=$((WAIT_TIME + 30))
-            done
-          fi
-
-      # Get EC2 Public IP
       - name: Get EC2 Public IP
         id: get_ip
         run: |
@@ -124,37 +87,36 @@ jobs:
             --instance-ids ${{ env.INSTANCE_ID }} \
             --query "Reservations[0].Instances[0].PublicIpAddress" \
             --output text)
+          echo "public_ip=$PUBLIC_IP" >> $GITHUB_OUTPUT
 
-          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
-          echo "Production Instance Public IP: $PUBLIC_IP"
+      - name: Set instance ID output
+        id: set_env
+        run: echo "instance_id=${{ env.INSTANCE_ID }}" >> $GITHUB_OUTPUT
 
-      # Print Public IP in GitHub Actions Logs
-      - name: Print Public IP
-        run: |
-          echo "=========================================="
-          echo "✅ EC2 Instance (kiii-demo-prod) is Ready!"
-          echo "🌍 Public IP Address: http://${{ env.PUBLIC_IP }}"
-          echo "=========================================="
-
-      # Setup SSH Key for connecting to EC2
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [build, aws_instance_prep]
+    steps:
       - name: Setup SSH Key
         run: |
           echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ec2_key.pem
           chmod 600 ec2_key.pem
 
-      # Copy docker-compose.yml to EC2
       - name: Copy docker-compose.yml to EC2
         run: |
-          scp -i ec2_key.pem -o StrictHostKeyChecking=no docker-compose.yml ec2-user@${{ env.PUBLIC_IP }}:/home/ec2-user/docker-compose.yml
+          scp -i ec2_key.pem -o StrictHostKeyChecking=no docker-compose.yml ec2-user@${{ needs.aws_instance_prep.outputs.public_ip }}:/home/ec2-user/docker-compose.yml
 
-      # Run docker-compose down and up on EC2
-      - name: Deploy on EC2 with Docker Compose
+      - name: Deploy with docker-compose
+        env:
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_USER: ${{ secrets.DB_USER }}
+          BRANCH_NAME: ${{ needs.build.outputs.branch_name }}
         run: |
-          ssh -i ec2_key.pem -o StrictHostKeyChecking=no ec2-user@${{ env.PUBLIC_IP }} "
-            export DB_PASSWORD='${{ secrets.DB_PASSWORD }}' && \
-            export DB_USER='${{ secrets.DB_USER }}' && \
-            export BRANCH_NAME='${{ steps.vars.outputs.branch_name }}' && \
-            cd /home/ec2-user && \
-            docker-compose down || true && \
-            docker-compose up -d
+          ssh -i ec2_key.pem -o StrictHostKeyChecking=no ec2-user@${{ needs.aws_instance_prep.outputs.public_ip }} "
+            echo 'DB_PASSWORD=${DB_PASSWORD}' > /home/ec2-user/.env &&
+            echo 'DB_USER=${DB_USER}' >> /home/ec2-user/.env &&
+            echo 'BRANCH_NAME=${BRANCH_NAME}' >> /home/ec2-user/.env &&
+            cd /home/ec2-user &&
+            docker-compose --env-file .env down || true &&
+            docker-compose --env-file .env up -d
           "
