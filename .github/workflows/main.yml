@@ -1,0 +1,151 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main  # Runs when code is merged into main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set branch name
+        id: vars
+        run: echo "branch_name=$(echo ${{ github.ref_name }} | tr '/' '-')" >> "$GITHUB_OUTPUT"
+
+      # Configure AWS Credentials
+      - name: Configure AWS Credentials
+        run: |
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set default.region ${{ secrets.AWS_REGION }}
+
+      # Authenticate with Docker Hub
+      - name: Login to Docker Hub
+        run: echo "${{ secrets.DOCKERHUB_PASSWORD }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+
+      - name: Build and push backend image
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_PREFIX }}-backend:${{ steps.vars.outputs.branch }}-latest ./backend
+          docker push ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_PREFIX }}-backend:${{ steps.vars.outputs.branch }}-latest
+
+      - name: Build and push frontend image
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/$kiii-2025-frontend:${{ steps.vars.outputs.branch }}-latest ./frontend
+          docker push ${{ secrets.DOCKER_USERNAME }}/$kiii-2025-frontend:${{ steps.vars.outputs.branch }}-latest
+
+
+
+      # Check if EC2 instance exists
+      - name: Find Existing EC2 Instance
+        id: find_instance
+        run: |
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Name,Values=kiii-${{ steps.vars.outputs.branch }}" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
+
+          if [[ "$INSTANCE_ID" != "None" ]]; then
+            echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+            echo "EXISTING_INSTANCE=true" >> $GITHUB_ENV
+          else
+            echo "EXISTING_INSTANCE=false" >> $GITHUB_ENV
+          fi
+
+      # Launch EC2 Instance using Launch Template (if needed)
+      - name: Launch EC2 Instance (if needed)
+        if: env.INSTANCE_ID == ''
+        run: |
+          INSTANCE_ID=$(aws ec2 run-instances \
+            --launch-template LaunchTemplateId=${{ secrets.EC2_LAUNCH_TEMPLATE_ID }} \
+            --tag-specifications 'ResourceType=instance,Tags=[{Key=Name,Value=kiii-${{ steps.vars.outputs.branch }}}]' \
+            --query 'Instances[0].InstanceId' \
+            --output text)
+
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+          echo "EXISTING_INSTANCE=false" >> $GITHUB_ENV
+          echo "Created new production instance with ID: $INSTANCE_ID"
+
+      # Wait for EC2 Instance to be Running AND Pass Status Checks
+      - name: Wait for EC2 Instance to Pass Status Checks
+        run: |
+          if [ "$EXISTING_INSTANCE" == "false" ]; then
+            echo "Waiting for EC2 instance ($INSTANCE_ID) to start and pass status checks..."
+            MAX_WAIT=300
+            WAIT_TIME=0
+
+            while true; do
+              INSTANCE_STATE=$(aws ec2 describe-instances \
+                --instance-ids $INSTANCE_ID \
+                --query "Reservations[0].Instances[0].State.Name" \
+                --output text)
+
+              SYSTEM_STATUS=$(aws ec2 describe-instance-status \
+                --instance-ids $INSTANCE_ID \
+                --query "InstanceStatuses[0].SystemStatus.Status" \
+                --output text)
+
+              INSTANCE_STATUS=$(aws ec2 describe-instance-status \
+                --instance-ids $INSTANCE_ID \
+                --query "InstanceStatuses[0].InstanceStatus.Status" \
+                --output text)
+
+              echo "Instance State: $INSTANCE_STATE | System Status: $SYSTEM_STATUS | Instance Status: $INSTANCE_STATUS"
+
+              if [ "$INSTANCE_STATE" == "running" ] && [ "$SYSTEM_STATUS" == "ok" ] && [ "$INSTANCE_STATUS" == "ok" ]; then
+                echo "EC2 instance is running and has passed status checks!"
+                break
+              fi
+
+              if [ "$WAIT_TIME" -ge "$MAX_WAIT" ]; then
+                echo "ERROR: EC2 instance did not pass status checks within $MAX_WAIT seconds!"
+                exit 1
+              fi
+
+              echo "EC2 instance is still initializing. Retrying in 30 seconds..."
+              sleep 30
+              WAIT_TIME=$((WAIT_TIME + 30))
+            done
+          fi
+
+      # Get EC2 Public IP
+      - name: Get EC2 Public IP
+        id: get_ip
+        run: |
+          PUBLIC_IP=$(aws ec2 describe-instances \
+            --instance-ids ${{ env.INSTANCE_ID }} \
+            --query "Reservations[0].Instances[0].PublicIpAddress" \
+            --output text)
+
+          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
+          echo "Production Instance Public IP: $PUBLIC_IP"
+
+      # Print Public IP in GitHub Actions Logs
+      - name: Print Public IP
+        run: |
+          echo "=========================================="
+          echo "✅ EC2 Instance (kiii-demo-prod) is Ready!"
+          echo "🌍 Public IP Address: http://${{ env.PUBLIC_IP }}"
+          echo "=========================================="
+
+      # Deploy using AWS SSM (Clone Repo if Missing & Start App)
+#      - name: Deploy to Production using SSM
+#        run: |
+#          aws ssm send-command \
+#            --document-name "AWS-RunShellScript" \
+#            --targets "Key=instanceIds,Values=${{ env.INSTANCE_ID }}" \
+#            --parameters 'commands=[
+#              "if [ ! -d ~/kiii-demo ]; then git clone https://github.com/${{ github.repository }} ~/kiii-demo; fi",
+#              "cd ~/kiii-demo && git pull origin main",
+#              "echo \"MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}\" > ~/kiii-demo/.env",
+#              "echo \"MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}\" >> ~/kiii-demo/.env",
+#              "echo \"MYSQL_USER=${{ secrets.MYSQL_USER }}\" >> ~/kiii-demo/.env",
+#              "echo \"MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}\" >> ~/kiii-demo/.env",
+#              "echo \"DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}\" >> ~/kiii-demo/.env",
+#              "cd ~/kiii-demo && docker-compose down && docker-compose pull && docker-compose up -d"
+#            ]' \
+#            --comment "Deploying latest production version"
