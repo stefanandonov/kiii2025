@@ -10,10 +10,10 @@ services:
     volumes:
       - db-data:/var/lib/mysql
   backend:
-    build: ./backend/ #TODO change this with docker image from dockerhub
+    image: stefan5andonov/kiii-2025-backend:${BRANCH_NAME}-latest
     restart: always
     ports:
-      - "5001:5000" # Should this be online?
+      - "5000:5000" # Should this be online?
     environment:
       - DB_HOST=db
       - DB_USER=${DB_USER}
@@ -21,7 +21,7 @@ services:
     links:
       - db
   frontend:
-    build: ./frontend/
+    image: stefan5andonov/kiii-2025-frontend:${BRANCH_NAME}-latest
     restart: always
     ports:
       - "8501:8501"
