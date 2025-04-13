@@ -136,20 +136,26 @@ jobs:
           echo "🌍 Public IP Address: http://${{ env.PUBLIC_IP }}"
           echo "=========================================="
 
-      # Deploy using AWS SSM (Clone Repo if Missing & Start App)
-#      - name: Deploy to Production using SSM
-#        run: |
-#          aws ssm send-command \
-#            --document-name "AWS-RunShellScript" \
-#            --targets "Key=instanceIds,Values=${{ env.INSTANCE_ID }}" \
-#            --parameters 'commands=[
-#              "if [ ! -d ~/kiii-demo ]; then git clone https://github.com/${{ github.repository }} ~/kiii-demo; fi",
-#              "cd ~/kiii-demo && git pull origin main",
-#              "echo \"MYSQL_ROOT_PASSWORD=${{ secrets.MYSQL_ROOT_PASSWORD }}\" > ~/kiii-demo/.env",
-#              "echo \"MYSQL_DATABASE=${{ secrets.MYSQL_DATABASE }}\" >> ~/kiii-demo/.env",
-#              "echo \"MYSQL_USER=${{ secrets.MYSQL_USER }}\" >> ~/kiii-demo/.env",
-#              "echo \"MYSQL_PASSWORD=${{ secrets.MYSQL_PASSWORD }}\" >> ~/kiii-demo/.env",
-#              "echo \"DOCKERHUB_USERNAME=${{ secrets.DOCKERHUB_USERNAME }}\" >> ~/kiii-demo/.env",
-#              "cd ~/kiii-demo && docker-compose down && docker-compose pull && docker-compose up -d"
-#            ]' \
-#            --comment "Deploying latest production version"
+      # Setup SSH Key for connecting to EC2
+      - name: Setup SSH Key
+        run: |
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ec2_key.pem
+          chmod 600 ec2_key.pem
+
+      # Copy docker-compose.yml to EC2
+      - name: Copy docker-compose.yml to EC2
+        run: |
+          scp -i ec2_key.pem -o StrictHostKeyChecking=no docker-compose.yml ec2-user@${{ env.PUBLIC_IP }}:/home/ec2-user/docker-compose.yml
+
+      # Run docker-compose down and up on EC2
+      - name: Deploy on EC2 with Docker Compose
+        run: |
+          ssh -i ec2_key.pem -o StrictHostKeyChecking=no ec2-user@${{ env.PUBLIC_IP }} << EOF
+            export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
+            export DB_USER="${{ secrets.DB_USER }}"
+            export BRANCH_NAME="${{ steps.vars.outputs.branch_name }}"
+          
+            cd /home/ec2-user
+            docker-compose down || true
+            docker-compose up -d
+          EOF
