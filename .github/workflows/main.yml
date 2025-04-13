@@ -93,18 +93,12 @@ jobs:
         id: set_env
         run: echo "instance_id=${{ env.INSTANCE_ID }}" >> $GITHUB_OUTPUT
 
-      - name: Install GitHub CLI
-        run: sudo apt-get install gh -y
-
-      - name: Post public IP as a comment
-        if: ${{ github.event_name == 'push' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          IP_ADDRESS: ${{ needs.aws_instance_prep.outputs.public_ip }}
-          BRANCH_NAME: ${{ needs.build.outputs.branch_name }}
+      - name: Print Public IP to Console
         run: |
-          gh api repos/${{ github.repository }}/commits/${{ github.sha }}/comments \
-            -f body="🚀 EC2 instance for branch \`${BRANCH_NAME}\` is ready.\n\n🌍 **Public IP:** http://${IP_ADDRESS}"
+          echo "============================================"
+          echo "✅ EC2 Instance is ready!"
+          echo "🌍 Public IP Address: http://${{ steps.get_ip.outputs.public_ip }}"
+          echo "============================================"
 
   deploy:
     runs-on: ubuntu-latest
