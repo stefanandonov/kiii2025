@@ -17,6 +17,10 @@ jobs:
         id: vars
         run: echo "branch_name=$(echo ${{ github.ref_name }} | tr '/' '-')" >> "$GITHUB_OUTPUT"
 
+      - name: Echo branch name
+        run: |
+          echo "Branch name is ${{ steps.vars.outputs.branch_name }}"
+
       # Configure AWS Credentials
       - name: Configure AWS Credentials
         run: |
