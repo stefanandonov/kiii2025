@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
 import pymysql
 
-db_host = os.getenv("DB_HOST","localhost")
+db_host = os.getenv("DB_HOST","db")
 db_user = os.getenv("DB_USER","root")
 db_password = os.getenv("DB_PASSWORD","rootpass")
 

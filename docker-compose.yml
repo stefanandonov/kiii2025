@@ -4,11 +4,17 @@ services:
     image: mysql:latest
     restart: always
     ports:
-      - "3306:3306"  #    Should this be online?
+      - "3306:3306"
     environment:
       - MYSQL_ROOT_PASSWORD=${DB_PASSWORD}
     volumes:
       - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     image: stefan5andonov/kiii-2025-backend:${BRANCH_NAME}-latest
     restart: always
@@ -18,8 +24,10 @@ services:
       - DB_HOST=db
       - DB_USER=${DB_USER}
       - DB_PASSWORD=${DB_PASSWORD}
-    links:
-      - db
+    depends_on:
+      db:
+        condition: service_healthy
+
   frontend:
     image: stefan5andonov/kiii-2025-frontend:${BRANCH_NAME}-latest
     restart: always
@@ -28,7 +36,7 @@ services:
     environment:
       - API_HOST=backend
       - API_PORT=5000
-    links:
+    depends_on:
       - backend
 volumes:
   db-data:
