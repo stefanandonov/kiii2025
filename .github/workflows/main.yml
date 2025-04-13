@@ -150,12 +150,11 @@ jobs:
       # Run docker-compose down and up on EC2
       - name: Deploy on EC2 with Docker Compose
         run: |
-          ssh -i ec2_key.pem -o StrictHostKeyChecking=no ec2-user@${{ env.PUBLIC_IP }} << EOF
-            export DB_PASSWORD="${{ secrets.DB_PASSWORD }}"
-            export DB_USER="${{ secrets.DB_USER }}"
-            export BRANCH_NAME="${{ steps.vars.outputs.branch_name }}"
-          
-            cd /home/ec2-user
-            docker-compose down || true
+          ssh -i ec2_key.pem -o StrictHostKeyChecking=no ec2-user@${{ env.PUBLIC_IP }} "
+            export DB_PASSWORD='${{ secrets.DB_PASSWORD }}' && \
+            export DB_USER='${{ secrets.DB_USER }}' && \
+            export BRANCH_NAME='${{ steps.vars.outputs.branch_name }}' && \
+            cd /home/ec2-user && \
+            docker-compose down || true && \
             docker-compose up -d
-          EOF
+          "
