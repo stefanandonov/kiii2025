@@ -1,5 +1,5 @@
 
-# 🚀 Guide: Deploying EC2 Infrastructure with Docker & Terraform  
+# 🚀 Guide: Deploying EC2 launch template with Docker & Terraform  
 ### 💡 Course: Continuous Integration and Delivery
 
 This guide will walk you through using **AWS** and a pre-built **Docker image** to automatically create a launch template and SSH key for EC2 — without needing to learn or write any Terraform code.
@@ -33,6 +33,7 @@ This guide will walk you through using **AWS** and a pre-built **Docker image** 
 4. Choose **“Application running outside AWS”**
 5. Click **Next → Create access key**
 6. ✅ **Save your Access Key ID and Secret Access Key** — this is your only chance to copy them
+ - **Be extremely cautious with these credentials! Don't send them to anyone else, as they can be easily exploited by someone to create expensive resources on your AWS account.**
 
 ---
 
@@ -103,9 +104,6 @@ ssh -i kiii-key.pem ec2-user@3.123.45.67
 
 To avoid AWS charges:
 - Go to **EC2 → Instances** → Terminate unused instances
-- Go to **Launch Templates** → Delete the launch template
-- Go to **EC2 → Key Pairs** → Delete the key pair
-- Go to **IAM → Roles** → Delete the role and instance profile if no longer needed
 
 ---
 
