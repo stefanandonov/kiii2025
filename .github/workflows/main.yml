@@ -30,8 +30,8 @@ jobs:
 
       - name: Build and push backend image
         run: |
-          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_PREFIX }}-backend:${{ steps.vars.outputs.branch }}-latest ./backend
-          docker push ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_PREFIX }}-backend:${{ steps.vars.outputs.branch }}-latest
+          docker build -t ${{ secrets.DOCKERHUB_USERNAME }}/$kiii-2025-backend:${{ steps.vars.outputs.branch }}-latest ./backend
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/$kiii-2025-backend:${{ steps.vars.outputs.branch }}-latest
 
       - name: Build and push frontend image
         run: |
