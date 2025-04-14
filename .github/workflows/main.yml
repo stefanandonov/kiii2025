@@ -3,7 +3,7 @@ name: Github CI/CD
 on:
   push:
     branches:
-      - main
+      - "*"
 
 jobs:
   build:
