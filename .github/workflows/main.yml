@@ -1,4 +1,4 @@
-name: Deploy to Production
+name: Github CI/CD
 
 on:
   push:
